@@ -1,11 +1,12 @@
 package main
 
 import (
-	"fmt"
+	//"fmt" // <-- 如果确实没用到 fmt.Sprintf 或其他 fmt 函数，就删除
 	"log"
-	"os"
-	"time"
+	//"os"  // <-- 如果确实没用到 os.Exit 或其他 os 函数，就删除
+	//"time"// <-- 如果确实没用到 time.Sleep 或其他 time 函数，就删除
 )
+
 
 const (
 	configFile  = "config.json"       // 配置文件名
