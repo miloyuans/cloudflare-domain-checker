@@ -26,9 +26,9 @@ type DomainInfo struct {
 
 // ZoneSummary 结构体用于存储单个账户的域名统计信息。
 type ZoneSummary struct {
-	TotalZones      int            // 总计域名数
-	StatusCounts    map[string]int // 按状态分类的域名数量 (e.g., "active": 5, "pending": 2)
-	DomainsWithDNSRecords int // 至少有一个DNS记录的域名数量
+	TotalZones          int            // 总计域名数
+	StatusCounts        map[string]int // 按状态分类的域名数量 (e.g., "active": 5, "pending": 2)
+	DomainsWithDNSRecords int            // 至少有一个DNS记录的域名数量
 }
 
 // GetCloudflareData 从给定的Cloudflare账户中获取域名和DNS记录信息。
@@ -49,16 +49,21 @@ func GetCloudflareData(accountName, apiToken string) ([]DomainInfo, *ZoneSummary
 	}
 
 	// 1. 获取账户下的所有域名 (Zone)
-	// 使用 cloudflare.ZoneListParams 替代 ListZonesOptions
-	zoneParams := cloudflare.ZoneListParams{PerPage: 50} // 每页最多50个Zone
+	// 适配旧版API：使用 cloudflare.ListZonesOptions
+	zoneOptions := cloudflare.ListZonesOptions{PerPage: 50} // 每页最多50个Zone
 	page := 1
 	for {
-		zoneParams.Page = page
-		// ListZones 返回 ([]cloudflare.Zone, *cloudflare.ResultInfo, error)
-		zones, res, err := api.ListZones(ctx, zoneParams)
+		zoneOptions.Page = page
+		// 适配旧版API：ListZonesContext 返回 cloudflare.ZonesResponse 和 error
+		// 并且 ListZonesContext 可能需要 AccountID 或其他过滤器，这里我们简化，仅使用分页
+		// 如果你想筛选特定账户，你可能需要额外的 AccountID 逻辑来构建 ListZonesOptions 或 WithZoneFilters
+		zonesResp, err := api.ListZonesContext(ctx, zoneOptions) // 传递 options struct
 		if err != nil {
 			return nil, nil, fmt.Errorf("为账户 '%s' 列出域名失败 (第 %d 页): %w", accountName, page, err)
 		}
+
+		zones := zonesResp.Result      // 获取 Zones 列表
+		resInfo := zonesResp.ResultInfo // 获取分页信息
 
 		if len(zones) == 0 {
 			break // 没有更多域名了
@@ -77,23 +82,30 @@ func GetCloudflareData(accountName, apiToken string) ([]DomainInfo, *ZoneSummary
 
 			// 获取域的TLS加密模式
 			tlsMode := "未知"
+			// 注意：旧版本 zone.SSL 可能是一个字符串指针或直接是字符串，需要根据具体库版本调整
 			if zone.SSL != nil {
-				tlsMode = string(*zone.SSL)
+				tlsMode = string(*zone.SSL) // 假设它仍然是指针
+			} else if zone.SSLSetting != nil { // 有些旧版本可能是 SSLSetting
+				tlsMode = zone.SSLSetting.Value
 			}
 
+
 			// 2. 获取每个域下的所有DNS解析记录
-			// 使用 cloudflare.DNSListRecordsParams 替代 ListDNSRecordsOptions
-			dnsRecordParams := cloudflare.DNSListRecordsParams{PerPage: 100} // 每页最多100个DNS记录
+			// 适配旧版API：使用 cloudflare.ListDNSRecordsOptions
+			dnsRecordOptions := cloudflare.ListDNSRecordsOptions{PerPage: 100} // 每页最多100个DNS记录
 			dnsPage := 1
 			foundDNSRecordsForZone := false // 标记当前zone是否至少有一个DNS记录
 			for {
-				dnsRecordParams.Page = dnsPage
-				// ListDNSRecords 返回 ([]cloudflare.DNSRecord, *cloudflare.ResultInfo, error)
-				records, dnsRes, err := api.ListDNSRecords(ctx, cloudflare.ZoneIdentifier(zone.ID), dnsRecordParams)
+				dnsRecordOptions.Page = dnsPage
+				// 适配旧版API：ListDNSRecords 返回 cloudflare.DNSRecordsResponse 和 error
+				dnsRecordsResp, err := api.ListDNSRecords(ctx, zone.ID, dnsRecordOptions) // 传递 zone ID 和 options struct
 				if err != nil {
 					log.Printf("警告: 无法为账户 '%s' 的域名 '%s' (%s) 列出DNS记录: %v", accountName, zone.Name, zone.ID, err)
 					break // 如果获取DNS记录失败，跳过此域的DNS记录处理
 				}
+
+				records := dnsRecordsResp.Result      // 获取 DNS 记录列表
+				dnsResInfo := dnsRecordsResp.ResultInfo // 获取分页信息
 
 				if len(records) > 0 {
 					foundDNSRecordsForZone = true
@@ -118,8 +130,8 @@ func GetCloudflareData(accountName, apiToken string) ([]DomainInfo, *ZoneSummary
 						DomainNSInfo:      nsInfo,
 					})
 				}
-                // 修正：分页信息直接在 dnsRes 上，而不是 dnsRes.ResultInfo
-				if dnsRes.Page >= dnsRes.TotalPages {
+                // 适配旧版API：使用 dnsResInfo 来判断分页
+				if dnsResInfo.Page >= dnsResInfo.TotalPages {
 					break // 没有更多DNS记录页了
 				}
 				dnsPage++
@@ -129,12 +141,48 @@ func GetCloudflareData(accountName, apiToken string) ([]DomainInfo, *ZoneSummary
 			}
 		}
 
-        // 修正：分页信息直接在 res 上，而不是 res.ResultInfo
-		if res.Page >= res.TotalPages {
+        // 适配旧版API：使用 resInfo 来判断分页
+		if resInfo.Page >= resInfo.TotalPages {
 			break // 没有更多域名页了
 		}
 		page++
 	}
 
 	return allDomainInfo, summary, nil
+}
+
+// 示例：主函数如何调用 GetCloudflareData
+func main() {
+    // 假设你有 API Token 和一个账户名
+    // 实际应用中这些值可能来自环境变量、配置文件或命令行参数
+    myAccountName := "My Cloudflare Account" // 给你的账户起个名字
+    myAPIToken := os.Getenv("CF_API_TOKEN") // 建议通过环境变量设置
+
+    if myAPIToken == "" {
+        log.Fatal("请设置 CF_API_TOKEN 环境变量")
+    }
+
+    fmt.Printf("正在从账户 '%s' 获取 Cloudflare 数据...\n", myAccountName)
+    domainData, summary, err := GetCloudflareData(myAccountName, myAPIToken)
+    if err != nil {
+        log.Fatalf("获取 Cloudflare 数据失败: %v", err)
+    }
+
+    fmt.Printf("\n--- 数据获取成功 ---\n")
+    fmt.Printf("总计域名数: %d\n", summary.TotalZones)
+    fmt.Printf("域名状态统计: %+v\n", summary.StatusCounts)
+    fmt.Printf("有DNS记录的域名数: %d\n", summary.DomainsWithDNSRecords)
+    fmt.Printf("获取到 %d 条 DNS 记录详情。\n", len(domainData))
+
+    // 打印前几条记录作为示例
+    if len(domainData) > 0 {
+        fmt.Println("\n--- 部分 DNS 记录详情 ---")
+        for i, info := range domainData {
+            if i >= 5 { // 只打印前5条
+                break
+            }
+            fmt.Printf("  域名: %s, 类型: %s, 内容: %s, 代理: %s\n",
+                info.Domain, info.DNSRecordType, info.DNSRecordContent, info.ProxyStatus)
+        }
+    }
 }
