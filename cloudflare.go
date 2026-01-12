@@ -40,7 +40,7 @@ func GetCloudflareData(accountName, apiToken string) ([]DomainInfo, *ZoneSummary
 		return nil, nil, fmt.Errorf("为账户 '%s' 创建Cloudflare API客户端失败: %w", accountName, err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // 设置API请求超时
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // 增加超时时间，避免API调用过慢
 	defer cancel()
 
 	var allDomainInfo []DomainInfo // 存储所有获取到的域名信息
@@ -49,11 +49,13 @@ func GetCloudflareData(accountName, apiToken string) ([]DomainInfo, *ZoneSummary
 	}
 
 	// 1. 获取账户下的所有域名 (Zone)
-	zonesOptions := cloudflare.ListZonesOptions{PerPage: 50} // 每页最多50个Zone
+	// 使用 cloudflare.ZoneListParams 替代 ListZonesOptions
+	zoneParams := cloudflare.ZoneListParams{PerPage: 50} // 每页最多50个Zone
 	page := 1
 	for {
-		zonesOptions.Page = page
-		zones, res, err := api.ListZones(ctx, zonesOptions)
+		zoneParams.Page = page
+		// ListZones 返回 ([]cloudflare.Zone, *cloudflare.ResultInfo, error)
+		zones, res, err := api.ListZones(ctx, zoneParams)
 		if err != nil {
 			return nil, nil, fmt.Errorf("为账户 '%s' 列出域名失败 (第 %d 页): %w", accountName, page, err)
 		}
@@ -80,12 +82,14 @@ func GetCloudflareData(accountName, apiToken string) ([]DomainInfo, *ZoneSummary
 			}
 
 			// 2. 获取每个域下的所有DNS解析记录
-			dnsRecordsOptions := cloudflare.ListDNSRecordsOptions{PerPage: 100} // 每页最多100个DNS记录
+			// 使用 cloudflare.DNSListRecordsParams 替代 ListDNSRecordsOptions
+			dnsRecordParams := cloudflare.DNSListRecordsParams{PerPage: 100} // 每页最多100个DNS记录
 			dnsPage := 1
 			foundDNSRecordsForZone := false // 标记当前zone是否至少有一个DNS记录
 			for {
-				dnsRecordsOptions.Page = dnsPage
-				records, dnsRes, err := api.ListDNSRecords(ctx, cloudflare.ZoneIdentifier(zone.ID), dnsRecordsOptions)
+				dnsRecordParams.Page = dnsPage
+				// ListDNSRecords 返回 ([]cloudflare.DNSRecord, *cloudflare.ResultInfo, error)
+				records, dnsRes, err := api.ListDNSRecords(ctx, cloudflare.ZoneIdentifier(zone.ID), dnsRecordParams)
 				if err != nil {
 					log.Printf("警告: 无法为账户 '%s' 的域名 '%s' (%s) 列出DNS记录: %v", accountName, zone.Name, zone.ID, err)
 					break // 如果获取DNS记录失败，跳过此域的DNS记录处理
@@ -114,8 +118,8 @@ func GetCloudflareData(accountName, apiToken string) ([]DomainInfo, *ZoneSummary
 						DomainNSInfo:      nsInfo,
 					})
 				}
-
-				if dnsRes.ResultInfo.Page >= dnsRes.ResultInfo.TotalPages {
+                // 修正：分页信息直接在 dnsRes 上，而不是 dnsRes.ResultInfo
+				if dnsRes.Page >= dnsRes.TotalPages {
 					break // 没有更多DNS记录页了
 				}
 				dnsPage++
@@ -125,7 +129,8 @@ func GetCloudflareData(accountName, apiToken string) ([]DomainInfo, *ZoneSummary
 			}
 		}
 
-		if res.ResultInfo.Page >= res.ResultInfo.TotalPages {
+        // 修正：分页信息直接在 res 上，而不是 res.ResultInfo
+		if res.Page >= res.TotalPages {
 			break // 没有更多域名页了
 		}
 		page++

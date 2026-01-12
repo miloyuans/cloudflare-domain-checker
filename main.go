@@ -3,6 +3,7 @@ package main
 import (
 	//"fmt" // <-- 如果确实没用到 fmt.Sprintf 或其他 fmt 函数，就删除
 	"log"
+	"encoding/json"
 	//"os"  // <-- 如果确实没用到 os.Exit 或其他 os 函数，就删除
 	//"time"// <-- 如果确实没用到 time.Sleep 或其他 time 函数，就删除
 )

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" // 如果使用的是v6, 需要修改为v6
 )
 
 // SendTelegramNotification 发送汇总消息和CSV文件作为附件到Telegram。
@@ -47,7 +47,7 @@ func SendTelegramNotification(botToken, chatIDStr, messageText, csvFilePath stri
 	document := tgbotapi.NewDocument(chatID, tgbotapi.FileReader{
 		Name:   "cloudflare_domains.csv", // Telegram中显示的文件名
 		Reader: file,
-		Size:   -1, // 大小将由库自动计算
+		// 修正：移除 Size 字段，最新版本库会自动处理
 	})
 	document.Caption = "Cloudflare 域名信息汇总报告" // 文件附件的标题
 	_, err = bot.Send(document)
@@ -77,7 +77,7 @@ func buildSummaryMessage(baseMessage string, allAccountSummaries map[string]*Zon
 		for status := range summary.StatusCounts {
 			statuses = append(statuses, status)
 		}
-		// 可以选择在此处对 statuses 进行排序，例如 sort.Strings(statuses)
+		// 可以在此处对 statuses 进行排序，例如 sort.Strings(statuses)
 
 		for _, status := range statuses {
 			count := summary.StatusCounts[status]
